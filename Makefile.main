@@ -1,0 +1,37 @@
+# Makefile for video acquisition project
+
+# Compiler and flags
+CC = gcc
+CFLAGS = -Wall -O2 -I/path/to/xclib/include  # Update the include path as necessary
+LDFLAGS = -L/path/to/xclib/lib -lxclib -ltiff  # Update the library path as necessary
+
+# Executable name
+TARGET = acquisition
+
+# Source files
+SRCS = acquisition.c
+
+# Object files
+OBJS = $(SRCS:.c=.o)
+
+# Default rule
+all: $(TARGET)
+
+# Rule to link object files to create executable
+$(TARGET): $(OBJS)
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+# Rule to compile source files into object files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule to clean up generated files
+clean:
+	rm -f $(OBJS) $(TARGET) x.bin y.bin z.bin t.bin output_frames.tif
+
+# Rule to run the program with an example command (optional)
+run: $(TARGET)
+	./$(TARGET) -x 100 -y 100 -w 320 -h 240 -b 3 -n 100 -s 10 -e 1000 -r 30
+
+.PHONY: all clean run
+
