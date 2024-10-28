@@ -881,75 +881,146 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_COMMAND:
 		switch (LOWORD(wParam)) {
+
 		case IDSNAP:
 			if (HIWORD(wParam) != BN_CLICKED)
-				return FALSE;
+				return(FALSE);
 			liveon = FALSE;
 			seqdisplaybuf = FALSE;
 			err = pxd_goSnap(UNITSMAP, 1);
 			if (err < 0)
 				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goSnap", MB_OK | MB_TASKMODAL);
-
-			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Image captured in SNAP mode.");
-
-			// Enable or disable relevant controls
 			EnableWindow(GetDlgItem(hDlg, IDLIVE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSNAP), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), TRUE);
 			EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
-			return TRUE;
+			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+			return(TRUE);
 
 		case IDLIVE:
 			if (HIWORD(wParam) != BN_CLICKED)
-				return FALSE;
+				return(FALSE);
 			liveon = TRUE;
 			seqdisplaybuf = FALSE;
 			err = pxd_goLive(UNITSMAP, 1L);
 			if (err < 0)
 				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLive", MB_OK | MB_TASKMODAL);
-
-			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Live mode active.");
-
-			// Enable or disable relevant controls
 			EnableWindow(GetDlgItem(hDlg, IDLIVE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSNAP), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
-			return TRUE;
+			EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), FALSE);
+			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+			return(TRUE);
 
 		case IDSTOP:
 			if (HIWORD(wParam) != BN_CLICKED)
-				return FALSE;
+				return(FALSE);
 			pxd_goUnLive(UNITSMAP);
 			liveon = FALSE;
 			seqdisplayon = FALSE;
-
-			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Live mode stopped.");
-
-			// Enable or disable relevant controls
 			EnableWindow(GetDlgItem(hDlg, IDLIVE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSNAP), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), TRUE);
 			EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
-			return TRUE;
+			EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), TRUE);
+			return(TRUE);
 
 		case IDSEQCAPTURE:
 			if (HIWORD(wParam) != BN_CLICKED)
-				return FALSE;
+				return(FALSE);
+			//
+			// Reminder: The pxd_goLiveSeq and pxd_goLiveSeqTrig
+			// return immediately with the sequence capture running
+			// in the background. In the context of this example program,
+			// being 'user-event-driven', we prefer not waiting for completion
+			// of the sequence capture.
+			//
+#if TRIG_START_SEQUENCE | TRIG_END_SEQUENCE | GPIN_START_SEQUENCE | GPIN_END_SEQUENCE
+			err = pxd_goLiveSeqTrig(UNITSMAP,
+				1,			// Starting image frame buffer
+				pxd_imageZdim(),	// Ending image frame buffer
+				1,			// Image frame buffer number increment
+				0,			// Number of captured images
+				1,			// Period between captured images
+				0, 0,
+#if TRIG_START_SEQUENCE
+				TRIG_START_GPIN, 0, TRIG_START_DELAY,
+#elif GPIN_START_SEQUENCE
+				GPIN_START_GPIN, 1, GPIN_START_DELAY,
+#else
+				0, 0, 0,
+#endif
+				0, 0, 0, 0, 0, 0, 0,
+#if TRIG_END_SEQUENCE
+				TRIG_END_GPIN, 0, TRIG_END_DELAY,
+#elif GPIN_END_SEQUENCE
+				GPIN_END_GPIN, 1, GPIN_END_DELAY,
+#else
+				0, 0, 0,
+#endif
+				0, 0, 0, 0, 0, 0);
+#else
 			err = pxd_goLiveSeq(UNITSMAP, 1, pxd_imageZdim(), 1, 0, 1);
+#endif
 			if (err < 0)
 				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLiveSeq", MB_OK | MB_TASKMODAL);
-
-			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Sequence capture in progress...");
-
+			liveon = FALSE;
+			seqdisplayon = FALSE;
+			EnableWindow(GetDlgItem(hDlg, IDLIVE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSNAP), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
-			return TRUE;
+			// Enable scroll so it can show capture status;
+			// it doesn't allow changing the currently capture buffer.
+			EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), TRUE);
+			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+			return(TRUE);
 
 		case IDSEQDISPLAY:
 			if (HIWORD(wParam) != BN_CLICKED)
-				return FALSE;
+				return(FALSE);
 			seqdisplaybuf = 1;
+			liveon = FALSE;
 			seqdisplayon = TRUE;
 			seqdisplaytime = GetTickCount();
-
-			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Displaying sequence...");
-
+			EnableWindow(GetDlgItem(hDlg, IDLIVE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSNAP), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
-			return TRUE;
+			EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), FALSE);
+			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+			return(TRUE);
+
+		case IDSEQSAVE:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return(FALSE);
+			//
+			// Save multiple images in one binary file?
+#if SAVE_BINARY
+			SaveBinary1();
+#endif
+			//
+			// Save multiple images in one TIFF file?
+#if USE_PXIPL&SAVE_TIFF
+			SaveTiff1();
+#endif
+			//
+			// Save multiple images in sequence of TIFF files?
+#if !USE_PXIPL&SAVE_TIFF
+			SaveTiffN();
+#endif
+			//
+			// Save multiple images in one AVI file?
+#if USE_PXIPL&SAVE_AVI
+			SaveAvi1();
+#endif
+			return(TRUE);
 		}
 		break;
 
