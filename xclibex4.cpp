@@ -1024,41 +1024,129 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
-	case WM_TIMER:
-		if (pxd_infoUnits()) {
-			static int faulting = 0;
-			if (!faulting) {
-				faulting++;
-				pxd_mesgFault(UNITSMAP);
-				faulting--;
-			}
-		}
+	 case WM_HSCROLL:
+	 {
+		 HWND hCtrl = (HWND)lParam;
+		 switch (GetWindowLong(hCtrl, GWL_ID)) {
+		 case IDBUFFERSCROLL:
+		 {
+			 if (liveon) {
+				 SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, pxd_capturedBuffer(1), TRUE);
+			 }
+			 else {
+				 pxbuffer_t b = seqdisplaybuf;
+				 switch (LOWORD(wParam)) {
+				 case SB_PAGEDOWN:	b += 5; 		break;
+				 case SB_LINEDOWN:	b += 1; 		break;
+				 case SB_PAGEUP: 	b -= 5; 		break;
+				 case SB_LINEUP: 	b -= 1; 		break;
+				 case SB_TOP:		b = pxd_imageZdim();	break;
+				 case SB_BOTTOM: 	b = 1;			break;
+				 case SB_THUMBPOSITION:
+				 case SB_THUMBTRACK:	b = HIWORD(wParam); break;
+				 default:
+					 return(FALSE);
+				 }
+				 b = max(1, min(pxd_imageZdim(), b));
+				 SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, b, TRUE);
+				 seqdisplaybuf = b;
+				 if (!seqdisplayon)
+					 for (int u = 0; u < UNITS; u++)
+						 DisplayBuffer(u, b, hWndImage, windImage);
+			 }
+			 return(TRUE);
+		 }
+		 }
+		 return(FALSE);
+	 }
 
-		pxbuffer_t buf = 1;
-		for (int u = 0; u < UNITS; u++) {
-			if (seqdisplayon) {
-				if (u == 0) {
-					if (seqdisplaytime + 500 > GetTickCount())
-						break;
-					seqdisplaytime = GetTickCount();
-					buf = seqdisplaybuf++;
-					if (seqdisplaybuf > pxd_imageZdim())
-						seqdisplaybuf = 1;
-				}
-			}
-			DisplayBuffer(u, buf, hWndImage, windImage);
-			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, buf, TRUE);
-		}
-		return TRUE;
+	 case WM_CLOSE:
+		 pxd_PIXCIclose();
+		 //DestroyWindow(GetParent(hDlg));
+#if SHOWIM_DIRECTXDISPLAY
+		 if (lpDD)
+			 lpDD->Release();
+		 if (hDDLibrary)
+			 FreeLibrary(hDDLibrary);
+		 lpDD = NULL;
+		 hDDLibrary = NULL;
+#endif
+#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
+		 if (hDrawDib)
+			 DrawDibClose(hDrawDib);
+		 hDrawDib = NULL;
+#endif
 
-	case WM_CLOSE:
-		SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Closing...");
-		pxd_PIXCIclose();
-		DestroyWindow(hWnd);
-		EndDialog(hDlg, 0);
-		return TRUE;
+		 DestroyWindow(hWnd);
+		 EndDialog(hDlg, 0);
+		 return(TRUE);
+
+	 case WM_TIMER:
+		 //
+		 // Monitor for asynchronous faults, such as video
+		 // being disconnected while capturing. These faults
+		 // can't be reported by functions such as pxd_goLive()
+		 // which initiate capture and return immediately.
+		 //
+		 // Should there be a fault and pxd_mesgFault() pop up a dialog,
+		 // the Windows TIMER will continue in a new thread. Thus the
+		 // 'faulting' variable and logic to limit to one dialog at a time.
+		 //
+		 if (pxd_infoUnits()) {	 // implies whether library is open
+			 static int faulting = 0;
+			 if (!faulting) {
+				 faulting++;
+				 pxd_mesgFault(UNITSMAP);
+				 faulting--;
+			 }
+		 }
+
+		 //
+		 // Has a new field or frame been captured
+		 // since the last time we checked?
+		 // Or, in sequence display mode, is it
+		 // time to display the next image?
+		 //
+		 // In sequence capture, the PIXCI driver is handles
+		 // switching from one capture buffer to the next -
+		 // this need only monitor the result.
+		 // During sequence display, this determines when,
+		 // and it what order, each previously captured buffer
+		 // should be displayed.
+		 //
+		 pxbuffer_t  buf = 1;
+		 for (int u = 0; u < UNITS; u++) {
+			 if (seqdisplayon) {
+				 if (u == 0) {
+					 if (seqdisplaytime + 500 > GetTickCount())
+						 break;	// no display yet, all units.
+					 seqdisplaytime = GetTickCount();
+					 buf = seqdisplaybuf++;
+					 if (seqdisplaybuf > pxd_imageZdim())
+						 seqdisplaybuf = 1;
+				 }
+			 }
+			 else {
+				 pxvbtime_t lasttime = pxd_capturedFieldCount(1 << u);
+				 if (lastcapttime[u] == lasttime)
+					 continue;
+				 lastcapttime[u] = lasttime;
+				 buf = pxd_capturedBuffer(1 << u);
+			 }
+			 DisplayBuffer(u, buf, hWndImage, windImage);
+			 //
+			 // Let buffer scroll bar show sequence capture activity.
+			 // Especially useful in triggered sequence mode, as it
+			 // will show when the trigger has arrived and the delay
+			 // expired so as to let the sequence capture run.
+			 //
+			 SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, buf, TRUE);
+		 }
+
+		 return(TRUE);
+
 	}
-	return FALSE;
+	return(FALSE);
 }
 
 //BOOL CALLBACK
