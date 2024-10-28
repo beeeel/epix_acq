@@ -685,6 +685,7 @@ void SaveBinary1()
 }
 
 
+#define IDSTATUS 1010 // Example ID for the status label
 
 /*
  * The Dialog
@@ -692,459 +693,592 @@ void SaveBinary1()
 BOOL CALLBACK
 PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 {
-    static  UINT	svgaBits;			    // pixel format of S/VGA
-    static  int 	liveon = 0;
-    static  int 	seqdisplayon = 0;
-    static  pxbuffer_t	seqdisplaybuf = 1;		    // which buffer being displayed?
-    static  DWORD	seqdisplaytime; 		    // when was last buffer displayed
-    static  pxvbtime_t	lastcapttime[UNITS] = {0};	    // when was image last captured
-    static  struct	pxywindow windImage[max(4,UNITS)];  // subwindow of child window for image display
-    static  HWND	hWndImage;			    // child window of dialog for image display
-	    int 	err = 0;
+	static UINT svgaBits;
+	static int liveon = 0;
+	static int seqdisplayon = 0;
+	static pxbuffer_t seqdisplaybuf = 1;
+	static DWORD seqdisplaytime;
+	static pxvbtime_t lastcapttime[UNITS] = { 0 };
+	static struct pxywindow windImage[max(4, UNITS)];
+	static HWND hWndImage;
+	int err = 0;
 
-    switch (wMsg) {
-      case WM_INITDIALOG:
-      {
-	RECT	rectImage;
-
-	//
-	// Open the PIXCI(R) frame grabber.
-	// If this program were to only support a single PIXCI(R)
-	// frame grabber, the first parameter could be simplified to:
-	//
-	//	if (pxd_PIXCIopen("", FORMAT, NULL) < 0)
-	//	    pxd__mesgFault(1);
-	//
-	// But, for the sake of multiple PIXCI(R) frame grabbers
-	// specify which units are to be used.
-	//
-	char driverparms[80];
-	driverparms[sizeof(driverparms)-1] = 0; // this & snprintf: overly conservative - avoids warning messages
-	_snprintf(driverparms, sizeof(driverparms)-1, "-DM 0x%x %s", UNITSOPENMAP, DRIVERPARMS);
-	//
-	// Either FORMAT or FORMATFILE_LOAD or FORMATFILE_COMP
-	// should have been selected above.
-	//
-	#if defined(FORMAT)
-	    if (pxd_PIXCIopen(driverparms, FORMAT, "") < 0)
-		pxd_mesgFault(UNITSMAP);
-	#elif defined(FORMATFILE_LOAD)
-	    //
-	    // The FORMATFILE can be read and loaded
-	    // during the pxd_PIXCIopen(), for convenience
-	    // of changing the format file without recompiling.
-	    //
-	    if (pxd_PIXCIopen(driverparms, "", FORMATFILE_LOAD) < 0)
-		pxd_mesgFault(UNITSMAP);
-	#elif defined(FORMATFILE_COMP)
-	    //
-	    // Or the FORMATFILE can be compiled into this application,
-	    // reducing the number of files that must be distributed, or
-	    // possibly lost.
-	    //
-	    // Note: On MSVC 6.0, if the precompiled header option is used,
-	    // the compiler objects to this code (C2006) when FORMATFILE_COMP
-	    // is not defined, even though this shouldn't be compiled
-	    // when FORMATFILE_COMP is not defined.
-	    // Either turn off the 'Use Precompiled Headers' option,
-	    // remove this code, or choose to use the FORMATFILE_COMP option.
-	    //
-	    if (pxd_PIXCIopen(driverparms, "Default", "") < 0)
-		pxd_mesgFault(UNITSMAP);
-	    {
-		#include FORMATFILE_COMP
-		pxd_videoFormatAsIncludedInit(0);
-		err = pxd_videoFormatAsIncluded(0);
-		if (err < 0)
-		    MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_videoFormatAsIncluded", MB_OK|MB_TASKMODAL);
-	    }
-	#endif
-
-	//
-	// Set our title.
-	//
-	SetWindowText(hDlg, "EPIX(R) PIXCI(R) Frame Grabber Example");
-
-	//
-	// Enable timer, for live video updates, checking for faults,
-	// and timed display fo sequences.
-	// See xclibex2.cpp for an alternate, using an Event
-	// instead of a timer.
-	//
-	SetTimer(hDlg, 1, 5, NULL);
-
-	//
-	// Get handle to image display area of dialog,
-	// then get its device context and size.
-	//
-	hWndImage = GetDlgItem(hDlg, IDIMAGE);
+	switch (wMsg) {
+	case WM_INITDIALOG:
 	{
-	    HDC  hDC = GetDC(hWndImage);
-	    GetClientRect(hWndImage, &rectImage);
-	    svgaBits = GetDeviceCaps(hDC, PLANES) * GetDeviceCaps(hDC, BITSPIXEL);
-	    ReleaseDC(hWndImage, hDC);
+		// Initialize dialog, open frame grabber, setup timer, etc.
+		// Initialize text control
+		SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Initializing...");
+		return TRUE;
 	}
 
-	//
-	// Determine displayed size.
-	// We could simply fill up the hWndImage, but
-	// much rather adjust the displayed image for
-	// correct aspect ratio.
-	//
-	windImage[0].nw.x = windImage[0].nw.y = 0;
-	windImage[0].se.x = rectImage.right+1;		 // inclusive->exclusive
-	windImage[0].se.y = rectImage.bottom+1; 	 // inclusive->exclusive
-	{
-	    double  scalex, scaley, aspect;
-	    aspect = pxd_imageAspectRatio();
-	    if (aspect == 0.0)
-		aspect = 1.0;
-	    scalex = windImage[0].se.x/(double)pxd_imageXdim();
-	    scaley = windImage[0].se.y/((double)pxd_imageYdim()*aspect);
-	    scalex = min(scalex, scaley);
-	    windImage[0].se.x = (int)(pxd_imageXdim() * scalex);
-	    windImage[0].se.y = (int)(pxd_imageYdim() * scalex * aspect);
-	}
-
-	//
-	// If StrecthDIBits is to be used, some VGA card drivers
-	// abhor horizontal dimensions which are not a multiple of 4.
-	// This isn't needed for other rendering methods, but doesn't hurt.
-	//
-	windImage[0].se.x &= ~3;
-
-	//
-	// For multiple units, display each of four units
-	// in quadrant of display area.
-	//
-	if (UNITS > 1) {
-	    windImage[0].se.x &= ~0xF;	 // See above StretchDIBits comment above
-	    windImage[1] = windImage[0];
-	    windImage[2] = windImage[0];
-	    windImage[3] = windImage[0];
-	    windImage[0].se.x /= 2;
-	    windImage[0].se.y /= 2;
-	    windImage[1].nw.x = windImage[1].se.x/2;
-	    windImage[1].se.y /= 2;
-	    windImage[2].se.x /= 2;
-	    windImage[2].nw.y = windImage[2].se.y/2;
-	    windImage[3].nw.x = windImage[3].se.x/2;
-	    windImage[3].nw.y = windImage[3].se.y/2;
-	}
-
-	//
-	// Init dialog controls.
-	//
-	SetScrollRange(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, pxd_imageZdim(), TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDLIVE),	      TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDSNAP),	      TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDSTOP),	      FALSE);
-	EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
-	EnableWindow(GetDlgItem(hDlg, IDSEQSAVE),  TRUE);
-
-	//
-	// If using DirectDraw, initialize access to it.
-	//
-	// DirectDraw may not be available!
-	// Error reporting should be added!
-	//
-	#if SHOWIM_DIRECTXDISPLAY
-	{
-	    HRESULT	    h;
-	    hDDLibrary = LoadLibrary("DDRAW");
-	    if (hDDLibrary) {
-		typedef HRESULT (WINAPI* OPEN)(void FAR*,LPDIRECTDRAW FAR*, void FAR*);
-		OPEN	lpfnDM;
-		lpfnDM = (OPEN)GetProcAddress(hDDLibrary, "DirectDrawCreate");
-		if (lpfnDM) {
-		    h = (*lpfnDM)(NULL, &lpDD, NULL);
-		    if (lpDD) {
-			h = lpDD->SetCooperativeLevel((HWND)hWnd, DDSCL_NORMAL);
-		    }
-		}
-	    }
-	}
-	#endif
-
-	//
-	// If using Video for Windows, initialize access to it.
-	//
-	#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
-	    hDrawDib = DrawDibOpen();
-	#endif
-
-	return(TRUE);
-      }
-
-      case WM_COMMAND:
-	switch (LOWORD(wParam)) {
-
-	  case IDSNAP:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    liveon = FALSE;
-	    seqdisplaybuf = FALSE;
-	    err = pxd_goSnap(UNITSMAP, 1);
-	    if (err < 0)
-		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goSnap", MB_OK|MB_TASKMODAL);
-	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  FALSE);
-	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
-	    return(TRUE);
-
-	  case IDLIVE:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    liveon = TRUE;
-	    seqdisplaybuf = FALSE;
-	    err = pxd_goLive(UNITSMAP, 1L);
-	    if (err < 0)
-		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLive", MB_OK|MB_TASKMODAL);
-	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),FALSE);
-	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
-	    return(TRUE);
-
-	  case IDSTOP:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    pxd_goUnLive(UNITSMAP);
-	    liveon = FALSE;
-	    seqdisplayon = FALSE;
-	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
-	    return(TRUE);
-
-	  case IDSEQCAPTURE:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    //
-	    // Reminder: The pxd_goLiveSeq and pxd_goLiveSeqTrig
-	    // return immediately with the sequence capture running
-	    // in the background. In the context of this example program,
-	    // being 'user-event-driven', we prefer not waiting for completion
-	    // of the sequence capture.
-	    //
-	    #if TRIG_START_SEQUENCE | TRIG_END_SEQUENCE | GPIN_START_SEQUENCE | GPIN_END_SEQUENCE
-		err = pxd_goLiveSeqTrig(UNITSMAP,
-				  1,			// Starting image frame buffer
-				  pxd_imageZdim(),	// Ending image frame buffer
-				  1,			// Image frame buffer number increment
-				  0,			// Number of captured images
-				  1,			// Period between captured images
-				  0, 0,
-				  #if TRIG_START_SEQUENCE
-				      TRIG_START_GPIN, 0, TRIG_START_DELAY,
-				  #elif GPIN_START_SEQUENCE
-				      GPIN_START_GPIN, 1, GPIN_START_DELAY,
-				  #else
-				      0, 0, 0,
-				  #endif
-				  0, 0, 0, 0, 0, 0, 0,
-				  #if TRIG_END_SEQUENCE
-				      TRIG_END_GPIN, 0, TRIG_END_DELAY,
-				  #elif GPIN_END_SEQUENCE
-				      GPIN_END_GPIN, 1, GPIN_END_DELAY,
-				  #else
-				      0, 0, 0,
-				  #endif
-				  0, 0, 0, 0, 0, 0);
-	    #else
-		err = pxd_goLiveSeq(UNITSMAP, 1, pxd_imageZdim(), 1, 0, 1);
-	    #endif
-	    if (err < 0)
-		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLiveSeq", MB_OK|MB_TASKMODAL);
-	    liveon = FALSE;
-	    seqdisplayon = FALSE;
-	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
-	    // Enable scroll so it can show capture status;
-	    // it doesn't allow changing the currently capture buffer.
-	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
-	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
-	    return(TRUE);
-
-	  case IDSEQDISPLAY:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    seqdisplaybuf = 1;
-	    liveon = FALSE;
-	    seqdisplayon = TRUE;
-	    seqdisplaytime = GetTickCount();
-	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
-	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
-	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),FALSE);
-	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
-	    return(TRUE);
-
-	  case IDSEQSAVE:
-	    if (HIWORD(wParam) != BN_CLICKED)
-		return(FALSE);
-	    //
-	    // Save multiple images in one binary file?
-	    #if SAVE_BINARY
-		SaveBinary1();
-	    #endif
-	    //
-	    // Save multiple images in one TIFF file?
-	    #if USE_PXIPL&SAVE_TIFF
-		SaveTiff1();
-	    #endif
-	    //
-	    // Save multiple images in sequence of TIFF files?
-	    #if !USE_PXIPL&SAVE_TIFF
-		SaveTiffN();
-	    #endif
-	    //
-	    // Save multiple images in one AVI file?
-	    #if USE_PXIPL&SAVE_AVI
-		SaveAvi1();
-	    #endif
-	    return(TRUE);
-	}
-	break;
-
-      case WM_HSCROLL:
-      {
-	HWND hCtrl = (HWND)lParam;
-	switch (GetWindowLong(hCtrl, GWL_ID)) {
-	case IDBUFFERSCROLL:
-	  {
-	    if (liveon) {
-		SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, pxd_capturedBuffer(1), TRUE);
-	    } else {
-		pxbuffer_t b = seqdisplaybuf;
+	case WM_COMMAND:
 		switch (LOWORD(wParam)) {
-		case SB_PAGEDOWN:	b += 5; 		break;
-		case SB_LINEDOWN:	b += 1; 		break;
-		case SB_PAGEUP: 	b -= 5; 		break;
-		case SB_LINEUP: 	b -= 1; 		break;
-		case SB_TOP:		b = pxd_imageZdim();	break;
-		case SB_BOTTOM: 	b = 1;			break;
-		case SB_THUMBPOSITION:
-		case SB_THUMBTRACK:	b = HIWORD(wParam); break;
-		default:
-		    return(FALSE);
-		}
-		b = max(1, min(pxd_imageZdim(), b));
-		SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, b, TRUE);
-		seqdisplaybuf = b;
-		if (!seqdisplayon)
-		    for (int u = 0; u < UNITS; u++)
-			DisplayBuffer(u, b, hWndImage, windImage);
-	    }
-	    return(TRUE);
-	  }
-	}
-	return(FALSE);
-      }
+		case IDSNAP:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return FALSE;
+			liveon = FALSE;
+			seqdisplaybuf = FALSE;
+			err = pxd_goSnap(UNITSMAP, 1);
+			if (err < 0)
+				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goSnap", MB_OK | MB_TASKMODAL);
 
-      case WM_CLOSE:
-	pxd_PIXCIclose();
-	//DestroyWindow(GetParent(hDlg));
-	#if SHOWIM_DIRECTXDISPLAY
-	    if (lpDD)
-		lpDD->Release();
-	    if (hDDLibrary)
-		FreeLibrary(hDDLibrary);
-	    lpDD = NULL;
-	    hDDLibrary = NULL;
-	#endif
-	#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
-	    if (hDrawDib)
-		DrawDibClose(hDrawDib);
-	    hDrawDib = NULL;
-	#endif
+			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Image captured in SNAP mode.");
 
-	DestroyWindow(hWnd);
-	EndDialog(hDlg, 0);
-	return(TRUE);
+			// Enable or disable relevant controls
+			EnableWindow(GetDlgItem(hDlg, IDLIVE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
+			return TRUE;
 
-      case WM_TIMER:
-	//
-	// Monitor for asynchronous faults, such as video
-	// being disconnected while capturing. These faults
-	// can't be reported by functions such as pxd_goLive()
-	// which initiate capture and return immediately.
-	//
-	// Should there be a fault and pxd_mesgFault() pop up a dialog,
-	// the Windows TIMER will continue in a new thread. Thus the
-	// 'faulting' variable and logic to limit to one dialog at a time.
-	//
-	if (pxd_infoUnits()) {	 // implies whether library is open
-	    static int faulting = 0;
-	    if (!faulting) {
-		faulting++;
-		pxd_mesgFault(UNITSMAP);
-		faulting--;
-	    }
-	}
+		case IDLIVE:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return FALSE;
+			liveon = TRUE;
+			seqdisplaybuf = FALSE;
+			err = pxd_goLive(UNITSMAP, 1L);
+			if (err < 0)
+				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLive", MB_OK | MB_TASKMODAL);
 
-	//
-	// Has a new field or frame been captured
-	// since the last time we checked?
-	// Or, in sequence display mode, is it
-	// time to display the next image?
-	//
-	// In sequence capture, the PIXCI driver is handles
-	// switching from one capture buffer to the next -
-	// this need only monitor the result.
-	// During sequence display, this determines when,
-	// and it what order, each previously captured buffer
-	// should be displayed.
-	//
-	pxbuffer_t  buf = 1;
-	for (int u = 0; u < UNITS; u++) {
-	    if (seqdisplayon) {
-		if (u == 0) {
-		    if (seqdisplaytime+500 > GetTickCount())
-			break;	// no display yet, all units.
-		    seqdisplaytime = GetTickCount();
-		    buf = seqdisplaybuf++;
-		    if (seqdisplaybuf > pxd_imageZdim())
+			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Live mode active.");
+
+			// Enable or disable relevant controls
+			EnableWindow(GetDlgItem(hDlg, IDLIVE), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
+			return TRUE;
+
+		case IDSTOP:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return FALSE;
+			pxd_goUnLive(UNITSMAP);
+			liveon = FALSE;
+			seqdisplayon = FALSE;
+
+			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Live mode stopped.");
+
+			// Enable or disable relevant controls
+			EnableWindow(GetDlgItem(hDlg, IDLIVE), TRUE);
+			EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
+			return TRUE;
+
+		case IDSEQCAPTURE:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return FALSE;
+			err = pxd_goLiveSeq(UNITSMAP, 1, pxd_imageZdim(), 1, 0, 1);
+			if (err < 0)
+				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLiveSeq", MB_OK | MB_TASKMODAL);
+
+			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Sequence capture in progress...");
+
+			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
+			return TRUE;
+
+		case IDSEQDISPLAY:
+			if (HIWORD(wParam) != BN_CLICKED)
+				return FALSE;
 			seqdisplaybuf = 1;
+			seqdisplayon = TRUE;
+			seqdisplaytime = GetTickCount();
+
+			SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Displaying sequence...");
+
+			EnableWindow(GetDlgItem(hDlg, IDSTOP), TRUE);
+			return TRUE;
 		}
-	    } else {
-		pxvbtime_t lasttime = pxd_capturedFieldCount(1<<u);
-		if (lastcapttime[u] == lasttime)
-		    continue;
-		lastcapttime[u] = lasttime;
-		buf = pxd_capturedBuffer(1<<u);
-	    }
-	    DisplayBuffer(u, buf, hWndImage, windImage);
-	    //
-	    // Let buffer scroll bar show sequence capture activity.
-	    // Especially useful in triggered sequence mode, as it
-	    // will show when the trigger has arrived and the delay
-	    // expired so as to let the sequence capture run.
-	    //
-	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, buf, TRUE);
+		break;
+
+	case WM_TIMER:
+		if (pxd_infoUnits()) {
+			static int faulting = 0;
+			if (!faulting) {
+				faulting++;
+				pxd_mesgFault(UNITSMAP);
+				faulting--;
+			}
+		}
+
+		pxbuffer_t buf = 1;
+		for (int u = 0; u < UNITS; u++) {
+			if (seqdisplayon) {
+				if (u == 0) {
+					if (seqdisplaytime + 500 > GetTickCount())
+						break;
+					seqdisplaytime = GetTickCount();
+					buf = seqdisplaybuf++;
+					if (seqdisplaybuf > pxd_imageZdim())
+						seqdisplaybuf = 1;
+				}
+			}
+			DisplayBuffer(u, buf, hWndImage, windImage);
+			SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, buf, TRUE);
+		}
+		return TRUE;
+
+	case WM_CLOSE:
+		SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Closing...");
+		pxd_PIXCIclose();
+		DestroyWindow(hWnd);
+		EndDialog(hDlg, 0);
+		return TRUE;
 	}
-
-	return(TRUE);
-
-    }
-    return(FALSE);
+	return FALSE;
 }
+
+//BOOL CALLBACK
+//PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
+//{
+//    static  UINT	svgaBits;			    // pixel format of S/VGA
+//    static  int 	liveon = 0;
+//    static  int 	seqdisplayon = 0;
+//    static  pxbuffer_t	seqdisplaybuf = 1;		    // which buffer being displayed?
+//    static  DWORD	seqdisplaytime; 		    // when was last buffer displayed
+//    static  pxvbtime_t	lastcapttime[UNITS] = {0};	    // when was image last captured
+//    static  struct	pxywindow windImage[max(4,UNITS)];  // subwindow of child window for image display
+//    static  HWND	hWndImage;			    // child window of dialog for image display
+//	    int 	err = 0;
+//
+//    switch (wMsg) {
+//      case WM_INITDIALOG:
+//      {
+//	RECT	rectImage;
+//
+//	//
+//	// Open the PIXCI(R) frame grabber.
+//	// If this program were to only support a single PIXCI(R)
+//	// frame grabber, the first parameter could be simplified to:
+//	//
+//	//	if (pxd_PIXCIopen("", FORMAT, NULL) < 0)
+//	//	    pxd__mesgFault(1);
+//	//
+//	// But, for the sake of multiple PIXCI(R) frame grabbers
+//	// specify which units are to be used.
+//	//
+//	char driverparms[80];
+//	driverparms[sizeof(driverparms)-1] = 0; // this & snprintf: overly conservative - avoids warning messages
+//	_snprintf(driverparms, sizeof(driverparms)-1, "-DM 0x%x %s", UNITSOPENMAP, DRIVERPARMS);
+//	//
+//	// Either FORMAT or FORMATFILE_LOAD or FORMATFILE_COMP
+//	// should have been selected above.
+//	//
+//	#if defined(FORMAT)
+//	    if (pxd_PIXCIopen(driverparms, FORMAT, "") < 0)
+//		pxd_mesgFault(UNITSMAP);
+//	#elif defined(FORMATFILE_LOAD)
+//	    //
+//	    // The FORMATFILE can be read and loaded
+//	    // during the pxd_PIXCIopen(), for convenience
+//	    // of changing the format file without recompiling.
+//	    //
+//	    if (pxd_PIXCIopen(driverparms, "", FORMATFILE_LOAD) < 0)
+//		pxd_mesgFault(UNITSMAP);
+//	#elif defined(FORMATFILE_COMP)
+//	    //
+//	    // Or the FORMATFILE can be compiled into this application,
+//	    // reducing the number of files that must be distributed, or
+//	    // possibly lost.
+//	    //
+//	    // Note: On MSVC 6.0, if the precompiled header option is used,
+//	    // the compiler objects to this code (C2006) when FORMATFILE_COMP
+//	    // is not defined, even though this shouldn't be compiled
+//	    // when FORMATFILE_COMP is not defined.
+//	    // Either turn off the 'Use Precompiled Headers' option,
+//	    // remove this code, or choose to use the FORMATFILE_COMP option.
+//	    //
+//	    if (pxd_PIXCIopen(driverparms, "Default", "") < 0)
+//		pxd_mesgFault(UNITSMAP);
+//	    {
+//		#include FORMATFILE_COMP
+//		pxd_videoFormatAsIncludedInit(0);
+//		err = pxd_videoFormatAsIncluded(0);
+//		if (err < 0)
+//		    MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_videoFormatAsIncluded", MB_OK|MB_TASKMODAL);
+//	    }
+//	#endif
+//
+//	//
+//	// Set our title.
+//	//
+//	SetWindowText(hDlg, "EPIX(R) PIXCI(R) Frame Grabber Example");
+//
+//	//
+//	// Enable timer, for live video updates, checking for faults,
+//	// and timed display fo sequences.
+//	// See xclibex2.cpp for an alternate, using an Event
+//	// instead of a timer.
+//	//
+//	SetTimer(hDlg, 1, 5, NULL);
+//
+//	//
+//	// Get handle to image display area of dialog,
+//	// then get its device context and size.
+//	//
+//	hWndImage = GetDlgItem(hDlg, IDIMAGE);
+//	{
+//	    HDC  hDC = GetDC(hWndImage);
+//	    GetClientRect(hWndImage, &rectImage);
+//	    svgaBits = GetDeviceCaps(hDC, PLANES) * GetDeviceCaps(hDC, BITSPIXEL);
+//	    ReleaseDC(hWndImage, hDC);
+//	}
+//
+//	//
+//	// Determine displayed size.
+//	// We could simply fill up the hWndImage, but
+//	// much rather adjust the displayed image for
+//	// correct aspect ratio.
+//	//
+//	windImage[0].nw.x = windImage[0].nw.y = 0;
+//	windImage[0].se.x = rectImage.right+1;		 // inclusive->exclusive
+//	windImage[0].se.y = rectImage.bottom+1; 	 // inclusive->exclusive
+//	{
+//	    double  scalex, scaley, aspect;
+//	    aspect = pxd_imageAspectRatio();
+//	    if (aspect == 0.0)
+//		aspect = 1.0;
+//	    scalex = windImage[0].se.x/(double)pxd_imageXdim();
+//	    scaley = windImage[0].se.y/((double)pxd_imageYdim()*aspect);
+//	    scalex = min(scalex, scaley);
+//	    windImage[0].se.x = (int)(pxd_imageXdim() * scalex);
+//	    windImage[0].se.y = (int)(pxd_imageYdim() * scalex * aspect);
+//	}
+//
+//	//
+//	// If StrecthDIBits is to be used, some VGA card drivers
+//	// abhor horizontal dimensions which are not a multiple of 4.
+//	// This isn't needed for other rendering methods, but doesn't hurt.
+//	//
+//	windImage[0].se.x &= ~3;
+//
+//	//
+//	// For multiple units, display each of four units
+//	// in quadrant of display area.
+//	//
+//	if (UNITS > 1) {
+//	    windImage[0].se.x &= ~0xF;	 // See above StretchDIBits comment above
+//	    windImage[1] = windImage[0];
+//	    windImage[2] = windImage[0];
+//	    windImage[3] = windImage[0];
+//	    windImage[0].se.x /= 2;
+//	    windImage[0].se.y /= 2;
+//	    windImage[1].nw.x = windImage[1].se.x/2;
+//	    windImage[1].se.y /= 2;
+//	    windImage[2].se.x /= 2;
+//	    windImage[2].nw.y = windImage[2].se.y/2;
+//	    windImage[3].nw.x = windImage[3].se.x/2;
+//	    windImage[3].nw.y = windImage[3].se.y/2;
+//	}
+//
+//	//
+//	// Init dialog controls.
+//	//
+//	SetScrollRange(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, pxd_imageZdim(), TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDLIVE),	      TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDSNAP),	      TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDSTOP),	      FALSE);
+//	EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
+//	EnableWindow(GetDlgItem(hDlg, IDSEQSAVE),  TRUE);
+//
+//	//
+//	// If using DirectDraw, initialize access to it.
+//	//
+//	// DirectDraw may not be available!
+//	// Error reporting should be added!
+//	//
+//	#if SHOWIM_DIRECTXDISPLAY
+//	{
+//	    HRESULT	    h;
+//	    hDDLibrary = LoadLibrary("DDRAW");
+//	    if (hDDLibrary) {
+//		typedef HRESULT (WINAPI* OPEN)(void FAR*,LPDIRECTDRAW FAR*, void FAR*);
+//		OPEN	lpfnDM;
+//		lpfnDM = (OPEN)GetProcAddress(hDDLibrary, "DirectDrawCreate");
+//		if (lpfnDM) {
+//		    h = (*lpfnDM)(NULL, &lpDD, NULL);
+//		    if (lpDD) {
+//			h = lpDD->SetCooperativeLevel((HWND)hWnd, DDSCL_NORMAL);
+//		    }
+//		}
+//	    }
+//	}
+//	#endif
+//
+//	//
+//	// If using Video for Windows, initialize access to it.
+//	//
+//	#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
+//	    hDrawDib = DrawDibOpen();
+//	#endif
+//
+//	return(TRUE);
+//      }
+//
+//      case WM_COMMAND:
+//	switch (LOWORD(wParam)) {
+//
+//	  case IDSNAP:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    liveon = FALSE;
+//	    seqdisplaybuf = FALSE;
+//	    err = pxd_goSnap(UNITSMAP, 1);
+//	    if (err < 0)
+//		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goSnap", MB_OK|MB_TASKMODAL);
+//	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  FALSE);
+//	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+//	    return(TRUE);
+//
+//	  case IDLIVE:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    liveon = TRUE;
+//	    seqdisplaybuf = FALSE;
+//	    err = pxd_goLive(UNITSMAP, 1L);
+//	    if (err < 0)
+//		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLive", MB_OK|MB_TASKMODAL);
+//	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),FALSE);
+//	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+//	    return(TRUE);
+//
+//	  case IDSTOP:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    pxd_goUnLive(UNITSMAP);
+//	    liveon = FALSE;
+//	    seqdisplayon = FALSE;
+//	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
+//	    return(TRUE);
+//
+//	  case IDSEQCAPTURE:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    //
+//	    // Reminder: The pxd_goLiveSeq and pxd_goLiveSeqTrig
+//	    // return immediately with the sequence capture running
+//	    // in the background. In the context of this example program,
+//	    // being 'user-event-driven', we prefer not waiting for completion
+//	    // of the sequence capture.
+//	    //
+//	    #if TRIG_START_SEQUENCE | TRIG_END_SEQUENCE | GPIN_START_SEQUENCE | GPIN_END_SEQUENCE
+//		err = pxd_goLiveSeqTrig(UNITSMAP,
+//				  1,			// Starting image frame buffer
+//				  pxd_imageZdim(),	// Ending image frame buffer
+//				  1,			// Image frame buffer number increment
+//				  0,			// Number of captured images
+//				  1,			// Period between captured images
+//				  0, 0,
+//				  #if TRIG_START_SEQUENCE
+//				      TRIG_START_GPIN, 0, TRIG_START_DELAY,
+//				  #elif GPIN_START_SEQUENCE
+//				      GPIN_START_GPIN, 1, GPIN_START_DELAY,
+//				  #else
+//				      0, 0, 0,
+//				  #endif
+//				  0, 0, 0, 0, 0, 0, 0,
+//				  #if TRIG_END_SEQUENCE
+//				      TRIG_END_GPIN, 0, TRIG_END_DELAY,
+//				  #elif GPIN_END_SEQUENCE
+//				      GPIN_END_GPIN, 1, GPIN_END_DELAY,
+//				  #else
+//				      0, 0, 0,
+//				  #endif
+//				  0, 0, 0, 0, 0, 0);
+//	    #else
+//		err = pxd_goLiveSeq(UNITSMAP, 1, pxd_imageZdim(), 1, 0, 1);
+//	    #endif
+//	    if (err < 0)
+//		MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLiveSeq", MB_OK|MB_TASKMODAL);
+//	    liveon = FALSE;
+//	    seqdisplayon = FALSE;
+//	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
+//	    // Enable scroll so it can show capture status;
+//	    // it doesn't allow changing the currently capture buffer.
+//	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),TRUE);
+//	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+//	    return(TRUE);
+//
+//	  case IDSEQDISPLAY:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    seqdisplaybuf = 1;
+//	    liveon = FALSE;
+//	    seqdisplayon = TRUE;
+//	    seqdisplaytime = GetTickCount();
+//	    EnableWindow(GetDlgItem(hDlg, IDLIVE),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSNAP),	  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY),  FALSE);
+//	    EnableWindow(GetDlgItem(hDlg, IDSTOP),	  TRUE);
+//	    EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL),FALSE);
+//	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, TRUE);
+//	    return(TRUE);
+//
+//	  case IDSEQSAVE:
+//	    if (HIWORD(wParam) != BN_CLICKED)
+//		return(FALSE);
+//	    //
+//	    // Save multiple images in one binary file?
+//	    #if SAVE_BINARY
+//		SaveBinary1();
+//	    #endif
+//	    //
+//	    // Save multiple images in one TIFF file?
+//	    #if USE_PXIPL&SAVE_TIFF
+//		SaveTiff1();
+//	    #endif
+//	    //
+//	    // Save multiple images in sequence of TIFF files?
+//	    #if !USE_PXIPL&SAVE_TIFF
+//		SaveTiffN();
+//	    #endif
+//	    //
+//	    // Save multiple images in one AVI file?
+//	    #if USE_PXIPL&SAVE_AVI
+//		SaveAvi1();
+//	    #endif
+//	    return(TRUE);
+//	}
+//	break;
+//
+//      case WM_HSCROLL:
+//      {
+//	HWND hCtrl = (HWND)lParam;
+//	switch (GetWindowLong(hCtrl, GWL_ID)) {
+//	case IDBUFFERSCROLL:
+//	  {
+//	    if (liveon) {
+//		SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, pxd_capturedBuffer(1), TRUE);
+//	    } else {
+//		pxbuffer_t b = seqdisplaybuf;
+//		switch (LOWORD(wParam)) {
+//		case SB_PAGEDOWN:	b += 5; 		break;
+//		case SB_LINEDOWN:	b += 1; 		break;
+//		case SB_PAGEUP: 	b -= 5; 		break;
+//		case SB_LINEUP: 	b -= 1; 		break;
+//		case SB_TOP:		b = pxd_imageZdim();	break;
+//		case SB_BOTTOM: 	b = 1;			break;
+//		case SB_THUMBPOSITION:
+//		case SB_THUMBTRACK:	b = HIWORD(wParam); break;
+//		default:
+//		    return(FALSE);
+//		}
+//		b = max(1, min(pxd_imageZdim(), b));
+//		SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, b, TRUE);
+//		seqdisplaybuf = b;
+//		if (!seqdisplayon)
+//		    for (int u = 0; u < UNITS; u++)
+//			DisplayBuffer(u, b, hWndImage, windImage);
+//	    }
+//	    return(TRUE);
+//	  }
+//	}
+//	return(FALSE);
+//      }
+//
+//      case WM_CLOSE:
+//	pxd_PIXCIclose();
+//	//DestroyWindow(GetParent(hDlg));
+//	#if SHOWIM_DIRECTXDISPLAY
+//	    if (lpDD)
+//		lpDD->Release();
+//	    if (hDDLibrary)
+//		FreeLibrary(hDDLibrary);
+//	    lpDD = NULL;
+//	    hDDLibrary = NULL;
+//	#endif
+//	#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
+//	    if (hDrawDib)
+//		DrawDibClose(hDrawDib);
+//	    hDrawDib = NULL;
+//	#endif
+//
+//	DestroyWindow(hWnd);
+//	EndDialog(hDlg, 0);
+//	return(TRUE);
+//
+//      case WM_TIMER:
+//	//
+//	// Monitor for asynchronous faults, such as video
+//	// being disconnected while capturing. These faults
+//	// can't be reported by functions such as pxd_goLive()
+//	// which initiate capture and return immediately.
+//	//
+//	// Should there be a fault and pxd_mesgFault() pop up a dialog,
+//	// the Windows TIMER will continue in a new thread. Thus the
+//	// 'faulting' variable and logic to limit to one dialog at a time.
+//	//
+//	if (pxd_infoUnits()) {	 // implies whether library is open
+//	    static int faulting = 0;
+//	    if (!faulting) {
+//		faulting++;
+//		pxd_mesgFault(UNITSMAP);
+//		faulting--;
+//	    }
+//	}
+//
+//	//
+//	// Has a new field or frame been captured
+//	// since the last time we checked?
+//	// Or, in sequence display mode, is it
+//	// time to display the next image?
+//	//
+//	// In sequence capture, the PIXCI driver is handles
+//	// switching from one capture buffer to the next -
+//	// this need only monitor the result.
+//	// During sequence display, this determines when,
+//	// and it what order, each previously captured buffer
+//	// should be displayed.
+//	//
+//	pxbuffer_t  buf = 1;
+//	for (int u = 0; u < UNITS; u++) {
+//	    if (seqdisplayon) {
+//		if (u == 0) {
+//		    if (seqdisplaytime+500 > GetTickCount())
+//			break;	// no display yet, all units.
+//		    seqdisplaytime = GetTickCount();
+//		    buf = seqdisplaybuf++;
+//		    if (seqdisplaybuf > pxd_imageZdim())
+//			seqdisplaybuf = 1;
+//		}
+//	    } else {
+//		pxvbtime_t lasttime = pxd_capturedFieldCount(1<<u);
+//		if (lastcapttime[u] == lasttime)
+//		    continue;
+//		lastcapttime[u] = lasttime;
+//		buf = pxd_capturedBuffer(1<<u);
+//	    }
+//	    DisplayBuffer(u, buf, hWndImage, windImage);
+//	    //
+//	    // Let buffer scroll bar show sequence capture activity.
+//	    // Especially useful in triggered sequence mode, as it
+//	    // will show when the trigger has arrived and the delay
+//	    // expired so as to let the sequence capture run.
+//	    //
+//	    SetScrollPos(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, buf, TRUE);
+//	}
+//
+//	return(TRUE);
+//
+//    }
+//    return(FALSE);
+//}
 
 LRESULT CALLBACK MainWndProc(
     HWND	hWnd,
