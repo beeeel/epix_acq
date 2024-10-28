@@ -706,10 +706,177 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 	switch (wMsg) {
 	case WM_INITDIALOG:
 	{
-		// Initialize dialog, open frame grabber, setup timer, etc.
-		// Initialize text control
-		SetWindowText(GetDlgItem(hDlg, IDSTATUS), "Initializing...");
-		return TRUE;
+		RECT	rectImage;
+
+		//
+		// Open the PIXCI(R) frame grabber.
+		// If this program were to only support a single PIXCI(R)
+		// frame grabber, the first parameter could be simplified to:
+		//
+		//	if (pxd_PIXCIopen("", FORMAT, NULL) < 0)
+		//	    pxd__mesgFault(1);
+		//
+		// But, for the sake of multiple PIXCI(R) frame grabbers
+		// specify which units are to be used.
+		//
+		char driverparms[80];
+		driverparms[sizeof(driverparms) - 1] = 0; // this & snprintf: overly conservative - avoids warning messages
+		_snprintf(driverparms, sizeof(driverparms) - 1, "-DM 0x%x %s", UNITSOPENMAP, DRIVERPARMS);
+		//
+		// Either FORMAT or FORMATFILE_LOAD or FORMATFILE_COMP
+		// should have been selected above.
+		//
+#if defined(FORMAT)
+		if (pxd_PIXCIopen(driverparms, FORMAT, "") < 0)
+			pxd_mesgFault(UNITSMAP);
+#elif defined(FORMATFILE_LOAD)
+	//
+	// The FORMATFILE can be read and loaded
+	// during the pxd_PIXCIopen(), for convenience
+	// of changing the format file without recompiling.
+	//
+		if (pxd_PIXCIopen(driverparms, "", FORMATFILE_LOAD) < 0)
+			pxd_mesgFault(UNITSMAP);
+#elif defined(FORMATFILE_COMP)
+	//
+	// Or the FORMATFILE can be compiled into this application,
+	// reducing the number of files that must be distributed, or
+	// possibly lost.
+	//
+	// Note: On MSVC 6.0, if the precompiled header option is used,
+	// the compiler objects to this code (C2006) when FORMATFILE_COMP
+	// is not defined, even though this shouldn't be compiled
+	// when FORMATFILE_COMP is not defined.
+	// Either turn off the 'Use Precompiled Headers' option,
+	// remove this code, or choose to use the FORMATFILE_COMP option.
+	//
+		if (pxd_PIXCIopen(driverparms, "Default", "") < 0)
+			pxd_mesgFault(UNITSMAP);
+		{
+#include FORMATFILE_COMP
+			pxd_videoFormatAsIncludedInit(0);
+			err = pxd_videoFormatAsIncluded(0);
+			if (err < 0)
+				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_videoFormatAsIncluded", MB_OK | MB_TASKMODAL);
+		}
+#endif
+
+		//
+		// Set our title.
+		//
+		SetWindowText(hDlg, "EPIX(R) PIXCI(R) Frame Grabber Example");
+
+		//
+		// Enable timer, for live video updates, checking for faults,
+		// and timed display fo sequences.
+		// See xclibex2.cpp for an alternate, using an Event
+		// instead of a timer.
+		//
+		SetTimer(hDlg, 1, 5, NULL);
+
+		//
+		// Get handle to image display area of dialog,
+		// then get its device context and size.
+		//
+		hWndImage = GetDlgItem(hDlg, IDIMAGE);
+		{
+			HDC  hDC = GetDC(hWndImage);
+			GetClientRect(hWndImage, &rectImage);
+			svgaBits = GetDeviceCaps(hDC, PLANES) * GetDeviceCaps(hDC, BITSPIXEL);
+			ReleaseDC(hWndImage, hDC);
+		}
+
+		//
+		// Determine displayed size.
+		// We could simply fill up the hWndImage, but
+		// much rather adjust the displayed image for
+		// correct aspect ratio.
+		//
+		windImage[0].nw.x = windImage[0].nw.y = 0;
+		windImage[0].se.x = rectImage.right + 1;		 // inclusive->exclusive
+		windImage[0].se.y = rectImage.bottom + 1; 	 // inclusive->exclusive
+		{
+			double  scalex, scaley, aspect;
+			aspect = pxd_imageAspectRatio();
+			if (aspect == 0.0)
+				aspect = 1.0;
+			scalex = windImage[0].se.x / (double)pxd_imageXdim();
+			scaley = windImage[0].se.y / ((double)pxd_imageYdim() * aspect);
+			scalex = min(scalex, scaley);
+			windImage[0].se.x = (int)(pxd_imageXdim() * scalex);
+			windImage[0].se.y = (int)(pxd_imageYdim() * scalex * aspect);
+		}
+
+		//
+		// If StrecthDIBits is to be used, some VGA card drivers
+		// abhor horizontal dimensions which are not a multiple of 4.
+		// This isn't needed for other rendering methods, but doesn't hurt.
+		//
+		windImage[0].se.x &= ~3;
+
+		//
+		// For multiple units, display each of four units
+		// in quadrant of display area.
+		//
+		if (UNITS > 1) {
+			windImage[0].se.x &= ~0xF;	 // See above StretchDIBits comment above
+			windImage[1] = windImage[0];
+			windImage[2] = windImage[0];
+			windImage[3] = windImage[0];
+			windImage[0].se.x /= 2;
+			windImage[0].se.y /= 2;
+			windImage[1].nw.x = windImage[1].se.x / 2;
+			windImage[1].se.y /= 2;
+			windImage[2].se.x /= 2;
+			windImage[2].nw.y = windImage[2].se.y / 2;
+			windImage[3].nw.x = windImage[3].se.x / 2;
+			windImage[3].nw.y = windImage[3].se.y / 2;
+		}
+
+		//
+		// Init dialog controls.
+		//
+		SetScrollRange(GetDlgItem(hDlg, IDBUFFERSCROLL), SB_CTL, 1, pxd_imageZdim(), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDLIVE), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSNAP), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSEQCAPTURE), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSEQDISPLAY), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
+		EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSEQSAVE), TRUE);
+
+		//
+		// If using DirectDraw, initialize access to it.
+		//
+		// DirectDraw may not be available!
+		// Error reporting should be added!
+		//
+#if SHOWIM_DIRECTXDISPLAY
+		{
+			HRESULT	    h;
+			hDDLibrary = LoadLibrary("DDRAW");
+			if (hDDLibrary) {
+				typedef HRESULT(WINAPI* OPEN)(void FAR*, LPDIRECTDRAW FAR*, void FAR*);
+				OPEN	lpfnDM;
+				lpfnDM = (OPEN)GetProcAddress(hDDLibrary, "DirectDrawCreate");
+				if (lpfnDM) {
+					h = (*lpfnDM)(NULL, &lpDD, NULL);
+					if (lpDD) {
+						h = lpDD->SetCooperativeLevel((HWND)hWnd, DDSCL_NORMAL);
+					}
+				}
+			}
+		}
+#endif
+
+		//
+		// If using Video for Windows, initialize access to it.
+		//
+#if SHOWIM_DRAWDIBDRAW || SHOWIM_DRAWDIBDISPLAY
+		hDrawDib = DrawDibOpen();
+#endif
+
+		return(TRUE);
 	}
 
 	case WM_COMMAND:
