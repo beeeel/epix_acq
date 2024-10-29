@@ -63,3 +63,4 @@
 #define IDSAVEAOIH	151
 #define IDSAVEPATH	152
 #define IDSETTINGS	153
+#define IDFPS		154

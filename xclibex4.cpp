@@ -328,7 +328,15 @@
     #include <compobj.h>
     #include <ddraw.h>
 #endif
+// Will's growing includes
 #include<iostream>
+#ifndef _INC_SHLWAPI
+#include <shlwapi.h> // For PathFileExists function
+#pragma comment(lib, "Shlwapi.lib")
+#endif
+
+
+#include <string.h>
 
 
 extern "C" {
@@ -361,6 +369,10 @@ pxcoord_t aoi_y = 1;
 pxcoord_t aoi_w = 640;
 pxcoord_t aoi_h = 480;
 bool qpdacq = FALSE;
+char savefilename[100];
+char settfilename[100];
+
+int imageWidth, imageHeight;
 
 /*
  * Display specified buffer from specified unit,
@@ -731,6 +743,208 @@ int UpdateTextboxValue(HWND hDlg, WPARAM wParam, double* targetVar, double minVa
 		return FALSE;
 	}
 }
+
+// Function to check and create a unique filename if the specified one already exists
+int UpdateSavePath(HWND hDlg, WPARAM wParam, char* savePathVar, int bufferSize) {
+	char buffer[100]; // Buffer to retrieve the text from the input field
+	char uniquePath[100];
+	COLORREF color = RGB(255, 255, 255); // Default background color (white)
+
+	// Retrieve the text from the textbox
+	GetDlgItemText(hDlg, LOWORD(wParam), buffer, sizeof(buffer));
+
+	// Variables for the directory and filename parts
+	char dirPath[100], fileName[50];
+
+	// Check if the directory portion of the path is valid
+	if (strlen(buffer) > 0) {
+		// Split the input into directory and filename parts
+		_splitpath_s(buffer, NULL, 0, dirPath, sizeof(dirPath), fileName, sizeof(fileName), NULL, 0);
+
+		// Construct the full directory path up to the filename level
+		snprintf(dirPath, sizeof(dirPath), "%s", dirPath);
+
+		if (PathFileExists(dirPath)) {
+			// Directory exists, now check the filename
+			snprintf(uniquePath, sizeof(uniquePath), "%s%s", dirPath, fileName);
+
+			// Check if the file already exists, and append a number if it does
+			int count = 1;
+			while (PathFileExists(uniquePath) && count < 100) {  // Check for existing files up to a limit
+				snprintf(uniquePath, sizeof(uniquePath), "%s%s_%d", dirPath, fileName, count++);
+			}
+
+			// Copy the unique path to the savePathVar
+			strncpy(savePathVar, uniquePath, bufferSize - 1);
+			savePathVar[bufferSize - 1] = '\0';
+
+			// Update the textbox to show the new unique path
+			SetDlgItemText(hDlg, LOWORD(wParam), uniquePath);
+
+			color = RGB(255, 255, 255);  // Reset to default color
+			return TRUE;
+		}
+		else {
+			// Directory doesn't exist, set error color and message
+			color = RGB(255, 0, 0);  // Set background color to red
+			MessageBox(NULL, "The specified directory path does not exist. Please enter a valid directory.", "Invalid Directory", MB_OK | MB_ICONERROR);
+		}
+	}
+	else {
+		MessageBox(NULL, "Please enter a valid file path.", "Invalid Path", MB_OK | MB_ICONERROR);
+	}
+
+	// Change the background color of the textbox to indicate an error if needed
+	HBRUSH hBrush = CreateSolidBrush(color);
+	SetClassLongPtr(GetDlgItem(hDlg, LOWORD(wParam)), GCLP_HBRBACKGROUND, (LONG_PTR)hBrush);
+	InvalidateRect(GetDlgItem(hDlg, LOWORD(wParam)), NULL, TRUE); // Force a redraw
+
+	return FALSE;
+}
+
+// Function to check and create a unique filename if the specified one already exists
+int UpdateSettingsPath(HWND hDlg, WPARAM wParam, char* savePathVar, int bufferSize) {
+	char buffer[100]; // Buffer to retrieve the text from the input field
+	char uniquePath[100];
+	COLORREF color = RGB(255, 255, 255); // Default background color (white)
+	bool ret = FALSE;
+
+	// Retrieve the text from the textbox
+	GetDlgItemText(hDlg, LOWORD(wParam), buffer, sizeof(buffer));
+
+	// Variables for the directory and filename parts
+	char dirPath[100], fileName[50];
+
+	// Check if the directory portion of the path is valid
+	if (strlen(buffer) > 0) {
+		// Split the input into directory and filename parts
+		_splitpath_s(buffer, NULL, 0, dirPath, sizeof(dirPath), fileName, sizeof(fileName), NULL, 0);
+
+		// Construct the full directory path up to the filename level
+		snprintf(dirPath, sizeof(dirPath), "%s\\", dirPath);
+
+		if (PathFileExists(dirPath)) {
+			// Directory exists, now check the filename
+			snprintf(uniquePath, sizeof(uniquePath), "%s%s", dirPath, fileName);
+
+			// Check if the file already exists
+			if (PathFileExists(uniquePath)) {  // Check for existing files up to a limit
+				color = RGB(255, 255, 255);  // Reset to default color
+				ret = TRUE;
+			}
+			else {
+				color = RGB(255, 100, 0);
+			}
+		}
+		else {
+			// Directory doesn't exist, set error color and message
+			color = RGB(255, 0, 0);  // Set background color to red
+			MessageBox(NULL, "The specified directory path does not exist. Please enter a valid directory.", "Invalid Directory", MB_OK | MB_ICONERROR);
+		}
+	}
+	else {
+		MessageBox(NULL, "Please enter a valid file path.", "Invalid Path", MB_OK | MB_ICONERROR);
+		color = RGB(255, 0, 100);  // Set background color to reddish
+	}
+
+	// Change the background color of the textbox to indicate an error if needed
+	HBRUSH hBrush = CreateSolidBrush(color);
+	SetClassLongPtr(GetDlgItem(hDlg, LOWORD(wParam)), GCLP_HBRBACKGROUND, (LONG_PTR)hBrush);
+	InvalidateRect(GetDlgItem(hDlg, LOWORD(wParam)), NULL, TRUE); // Force a redraw
+
+	return ret;
+}
+
+int updateResolution(HWND hDlg, double goalVal) {
+	int unitmap = UNITSMAP;
+	int subsample = pxd_SILICONVIDEO_getSubsample(unitmap);; // Initial value for subsample
+	int scandirection = ('L' << 8) | 'T'; // Set scan direction
+	int bitdepth = 10; // Set bit depth to 10
+	double  pixelClkFreq = pxd_SILICONVIDEO_getPixelClock(unitmap);
+	double  framePeriod = pxd_SILICONVIDEO_getFramePeriod(unitmap);
+
+	// Define one-element arrays for AOI parameters, initialized with current global values
+	int aoileft[1] = { aoi_x };
+	int aoitop[1] = { aoi_y };
+	int aoiwidth[1] = { aoi_w };
+	int aoiheight[1] = { aoi_h };
+
+	// Call the SDK function to correct values to the nearest valid settings
+	int result = pxd_SILICONVIDEO_getMinMaxResolution(
+		unitmap, &subsample, aoileft, aoitop, aoiwidth, aoiheight, &scandirection, &bitdepth, 0, 0	);
+
+	// Check for errors in the SDK call
+	if (result < 0) {
+		MessageBox(hDlg, "Error correcting AOI resolution", "Resolution Update", MB_OK | MB_ICONERROR);
+		return FALSE;
+	}
+
+	//
+	// Set the AOI twice to get fastest video
+	//
+	result = pxd_SILICONVIDEO_setResolutionAndTiming(unitmap, 0, subsample, *aoileft, *aoitop, *aoiwidth,
+		*aoiheight, scandirection, bitdepth, 0, 0, pixelClkFreq,
+		framePeriod, 0, 0, 0);
+
+	// Check for errors in the SDK call
+	if (result < 0) {
+		MessageBox(hDlg, "Error setting AOI resolution", "Resolution Update", MB_OK | MB_ICONERROR);
+		return FALSE;
+	}
+
+	framePeriod = pxd_SILICONVIDEO_getMinMaxFramePeriod(unitmap, goalVal);
+
+	result = pxd_SILICONVIDEO_setResolutionAndTiming(unitmap, 0, subsample, *aoileft, *aoitop, *aoiwidth,
+		*aoiheight, scandirection, bitdepth, 0, 0, pixelClkFreq,
+		framePeriod, 0, 0, 0);
+
+	// Check for errors in the SDK call
+	if (result < 0) {
+		MessageBox(hDlg, "Error setting AOI resolution", "Resolution Update", MB_OK | MB_ICONERROR);
+		return FALSE;
+	}
+
+	// Update global variables with validated values
+	aoi_x = aoileft[0];
+	aoi_y = aoitop[0];
+	aoi_w = aoiwidth[0];
+	aoi_h = aoiheight[0];
+
+	// Format the validated AOI values as strings for display in the text boxes
+	char buffer[32];
+
+	snprintf(buffer, sizeof(buffer), "%d", aoi_x);
+	SetDlgItemText(hDlg, IDSAVEAOIX, buffer);
+
+	snprintf(buffer, sizeof(buffer), "%d", aoi_y);
+	SetDlgItemText(hDlg, IDSAVEAOIY, buffer);
+
+	snprintf(buffer, sizeof(buffer), "%d", aoi_w);
+	SetDlgItemText(hDlg, IDSAVEAOIW, buffer);
+
+	snprintf(buffer, sizeof(buffer), "%d", aoi_h);
+	SetDlgItemText(hDlg, IDSAVEAOIH, buffer);
+
+	// Calculate FPS based on framePeriod
+	if (framePeriod > 0) {
+		double fps = 1000.0 / framePeriod;
+		snprintf(buffer, sizeof(buffer), "%.2f", fps);
+	}
+	else {
+		snprintf(buffer, sizeof(buffer), "N/A");
+	}
+
+	// Display FPS in the non-editable text field
+	SetDlgItemText(hDlg, IDFPS, buffer);
+
+	// You can optionally display a success message or add further handling if needed
+	return TRUE;
+}
+
+int updateResolution(HWND hDlg) {
+	return updateResolution(hDlg, (double)0.0);
+}
+
 /*
  * The Dialog
  */
@@ -852,6 +1066,43 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 		}
 
 		//
+		// Seems as good a place as any to save the image dimensions
+		// so we know what the acceptable AOI range is.
+		//
+		imageWidth = pxd_imageXdim();
+		imageHeight = pxd_imageYdim();
+
+		//
+		// Update textboxes with defaults
+		//
+		char buffer[32];
+
+		// Set IDSAVEAOIW with the value of imageWidth
+		snprintf(buffer, sizeof(buffer), "%d", imageWidth);
+		SetDlgItemText(hDlg, IDSAVEAOIW, buffer);
+
+		// Set IDSAVEAOIH with the value of imageHeight
+		snprintf(buffer, sizeof(buffer), "%d", imageHeight);
+		SetDlgItemText(hDlg, IDSAVEAOIH, buffer);
+
+		// Set IDSAVEAOIX with the initial X position (0)
+		snprintf(buffer, sizeof(buffer), "%d", 0);
+		SetDlgItemText(hDlg, IDSAVEAOIX, buffer);
+
+		// Set IDSAVEAOIY with the initial Y position (0)
+		snprintf(buffer, sizeof(buffer), "%d", 0);
+		SetDlgItemText(hDlg, IDSAVEAOIY, buffer);
+
+		// Set IDSAVEEXP and IDSAVEINT too
+		exp_ms = pxd_SILICONVIDEO_getExposure(UNITSMAP);
+		snprintf(buffer, sizeof(buffer), "%f", exp_ms);
+		SetDlgItemText(hDlg, IDSAVEEXP, buffer);
+
+		snprintf(buffer, sizeof(buffer), "%d", save_int);
+		SetDlgItemText(hDlg, IDSAVEINT, buffer);
+		
+
+		//
 		// If StrecthDIBits is to be used, some VGA card drivers
 		// abhor horizontal dimensions which are not a multiple of 4.
 		// This isn't needed for other rendering methods, but doesn't hurt.
@@ -888,6 +1139,15 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 		EnableWindow(GetDlgItem(hDlg, IDSTOP), FALSE);
 		EnableWindow(GetDlgItem(hDlg, IDBUFFERSCROLL), TRUE);
 		EnableWindow(GetDlgItem(hDlg, IDSEQSAVE), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDQPDACQ), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEPATH), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSETTINGS), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEINT), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEEXP), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEAOIX), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEAOIY), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEAOIW), TRUE);
+		EnableWindow(GetDlgItem(hDlg, IDSAVEAOIH), TRUE);
 
 		//
 		// If using DirectDraw, initialize access to it.
@@ -1084,6 +1344,12 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 
 
 		case IDSAVEEXP:
+			//
+			// I don't know if I should disbelieve this or the FPS calculation, 
+			// but one of them is wrong because apparently I can use 5 ms exposure 
+			// time and acquire more than 1,000 fps. Hmmm...
+			//
+
 			if (HIWORD(wParam) != EN_KILLFOCUS)
 				return(FALSE);
 			
@@ -1091,13 +1357,41 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 			if (!err)
 				return FALSE;
 
-			err = pxd_SILICONVIDEO_setExposure(UNITSMAP, 0, exp_ms);
-			char str[50];
-			sprintf(str, "err val: %i, exp_ms: %f\n", err, exp_ms);
+			char str[150];
+			double exp_act, exp2;
+			int err;
 
-			MessageBox(NULL, (LPCSTR) str, "pxd_goLiveSeq", MB_OK | MB_TASKMODAL);
+			updateResolution(hDlg, (double)9E99);
+
+			// Step 2: Get the allowable exposure closest to exp_ms based on the max frame period
+			exp_act = pxd_SILICONVIDEO_getMinMaxExposure(UNITSMAP, exp_ms);
+			err = pxd_SILICONVIDEO_setExposure(UNITSMAP, 0, exp_act);
+			exp2 = pxd_SILICONVIDEO_getExposure(UNITSMAP);
 			if (err < 0) {
-				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_goLiveSeq", MB_OK | MB_TASKMODAL);
+				MessageBox(NULL, "Failed to set exposure", "Error", MB_OK | MB_ICONERROR);
+				return FALSE;
+			}
+
+			updateResolution(hDlg);
+
+			// Step 4: Display the updated information
+			sprintf(str, "Current Z dimension: %i\n", pxd_imageZdim());
+			MessageBox(NULL, (LPCSTR)str, "pxd_saveExp", MB_OK | MB_TASKMODAL);
+
+			// Step 5: Check and notify if the requested exposure differs from the allowable exposure
+			if (exp_act != exp_ms) {
+				double rat = exp_act / exp_ms, inrat = exp_ms / exp_act;
+				if (!(rat < 1.1 && inrat < 1.1)) {
+					sprintf(str, "Failed to set exposure to: %f ms, closest allowed: %f ms\n", exp_ms, exp_act);
+					MessageBox(NULL, (LPCSTR)str, "pxd_saveExp", MB_OK | MB_TASKMODAL);
+				}
+			}
+			exp_ms = exp2;
+			sprintf(str, "%f", exp_ms);
+			SetDlgItemText(hDlg, IDSAVEEXP, str);  // Update the textbox to show the actual exposure set
+			
+			if (err < 0) {
+				MessageBox(NULL, pxd_mesgErrorCode(err), "pxd_saveExp", MB_OK | MB_TASKMODAL);
 				return(FALSE);
 			}
 			
@@ -1107,31 +1401,57 @@ PIXCIDialogProc(HWND hDlg, UINT wMsg, WPARAM wParam, LPARAM lParam)
 			if (HIWORD(wParam) != EN_KILLFOCUS)
 				return(FALSE);
 			UpdateTextboxValue(hDlg, wParam, &aoi_x, 0, "AOI X updated successfully!", "Please enter a valid non-negative number for AOI X.");
-			return(TRUE);
+
+			err = updateResolution(hDlg);
+			if (err)
+				return(TRUE);
+			else
+				return FALSE;
 
 		case IDSAVEAOIY:
 			if (HIWORD(wParam) != EN_KILLFOCUS)
 				return(FALSE);
 			UpdateTextboxValue(hDlg, wParam, &aoi_y, 0, "AOI Y updated successfully!", "Please enter a valid non-negative number for AOI Y.");
-			return(TRUE);
+			err = updateResolution(hDlg);
+			if (err)
+				return(TRUE);
+			else
+				return FALSE;
 
 		case IDSAVEAOIW:
 			if (HIWORD(wParam) != EN_KILLFOCUS)
 				return(FALSE);
+
 			UpdateTextboxValue(hDlg, wParam, &aoi_w, 1, "Save AOI Width updated successfully!", "Please enter a valid positive number for AOI Width.");
-			return(TRUE);
+			err = updateResolution(hDlg);
+			if (err)
+				return(TRUE);
+			else
+				return FALSE;
 
 		case IDSAVEAOIH:
 			if (HIWORD(wParam) != EN_KILLFOCUS)
 				return(FALSE);
 			UpdateTextboxValue(hDlg, wParam, &aoi_h, 1, "Save AOI Height updated successfully!", "Please enter a valid positive number for AOI Height.");
-			return(TRUE);
+			err = updateResolution(hDlg);
+			if (err)
+				return(TRUE);
+			else
+				return FALSE;
 
 		case IDSAVEPATH:
-			return TRUE;
+			if (HIWORD(wParam) != EN_KILLFOCUS)  // Ensure it only updates on losing focus
+				return FALSE;
+
+			err = UpdateSavePath(hDlg, wParam, savefilename, sizeof(savefilename));
+			return err;
 
 		case IDSETTINGS:
-			return TRUE;
+			if (HIWORD(wParam) != EN_KILLFOCUS)  // Ensure it only updates on losing focus
+				return FALSE;
+			err = UpdateSavePath(hDlg, wParam, settfilename, sizeof(settfilename)); 
+
+			return err;
 
 		case IDQPDACQ:
 			if (HIWORD(wParam) != BN_CLICKED)
