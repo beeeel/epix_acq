@@ -1108,15 +1108,6 @@ void saveData(const std::vector<std::unique_ptr<unsigned short[]>>& imageArray,
 	const std::vector<double>& Y,
 	const std::vector<double>& Z)
 {
-	// Retrieve the current path from the textbox
-	GetDlgItemText(hDlg, IDSAVEPATH, savefilename, sizeof(savefilename));
-
-	// Run UpdateSavePath to ensure a unique and valid path
-	if (!UpdateSavePath(hDlg, MAKEWPARAM(IDSAVEPATH, EN_CHANGE), savefilename, sizeof(savefilename))) {
-		MessageBox(NULL, "Error with save path. Please check the path.", "Save Path Error", MB_OK | MB_ICONERROR);
-		return; // Abort acquisition if path is invalid
-	}
-
 	// Use this function at the start of your saveData function
 	createSaveDirectory(savefilename);
 
@@ -1190,6 +1181,17 @@ void saveData(const std::vector<std::unique_ptr<unsigned short[]>>& imageArray,
 
 // Image processing function
 void processImageThread(HWND hWndImage, struct pxywindow windImage[]) {
+
+	// Retrieve the current path from the textbox
+	char currentSavePath[100];
+	GetDlgItemText(hDlg, IDSAVEPATH, currentSavePath, sizeof(currentSavePath));
+
+	// Run UpdateSavePath to ensure a unique and valid path
+	if (!UpdateSavePath(hDlg, MAKEWPARAM(IDSAVEPATH, EN_CHANGE), currentSavePath, sizeof(currentSavePath))) {
+		MessageBox(NULL, "Error with save path. Please check the path.", "Save Path Error", MB_OK | MB_ICONERROR);
+		return; // Abort acquisition if path is invalid
+	}
+
 	// Calculate total frames to save in memory and allocate
 	int numSavedFrames = n_frames / save_int + 1;
 

@@ -1,54 +1,122 @@
-/*
- *
- *	xclibex4.rc	External	12-Oct-2002
- *
- *	Copyright (C)  1998-2000  EPIX, Inc.  All rights reserved.
- *
- *	Example program for XCOBJ/XCLIB C Library: resource.
- *
- *
- */
-
+// Microsoft Visual C++ generated resource script.
+//
 #include <windows.h>
 #include <winver.h>
+#include "resource.h"
 #include "xclibex2.h"
 
 
-PIXCIDIALOG DIALOG DISCARDABLE	33, 56, 274, 160
-    STYLE WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU /* | WS_THICKFRAME*/
+/////////////////////////////////////////////////////////////////////////////
+// English (United Kingdom) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENG)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_UK
+#pragma code_page(1252)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+PIXCIDIALOG DIALOGEX 33, 56, 600, 400
+STYLE WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+FONT 8, "MS Sans Serif", 0, 0, 0x0
+BEGIN
+    PUSHBUTTON      "Snap",IDSNAP,436,10,50,12
+    PUSHBUTTON      "Live",IDLIVE,436,24,50,12
+    PUSHBUTTON      "Stop",IDSTOP,436,38,50,12
+    PUSHBUTTON      "Seq. Capture",IDSEQCAPTURE,436,52,50,12
+    PUSHBUTTON      "Seq. Display",IDSEQDISPLAY,436,66,50,12
+    PUSHBUTTON      "Seq. Save",IDSEQSAVE,436,80,50,12
+    LTEXT           "Buffer",-1,436,94,50,8
+    SCROLLBAR       IDBUFFERSCROLL,436,104,50,8
+    LTEXT           "N frames:",-1,510,156,50,8
+    EDITTEXT        IDNFRAMES,510,166,50,12,ES_AUTOHSCROLL
+    LTEXT           "FPS:",-1,436,120,20,10
+    LTEXT           "",IDFPS,527,180,40,10
+    PUSHBUTTON      "QPD acq.",IDQPDACQ,437,140,50,12
+    LTEXT           "",IDIMAGE,1,1,400,400
+    LTEXT           "Save path",-1,110,306,50,8
+    EDITTEXT        IDSAVEPATH,110,316,200,12,ES_AUTOHSCROLL
+    LTEXT           "Settings import path",-1,110,330,50,8
+    EDITTEXT        IDSETTINGS,110,340,150,12,ES_AUTOHSCROLL
+    LTEXT           "Save interval",-1,510,10,50,8
+    EDITTEXT        IDSAVEINT,510,20,50,12,ES_AUTOHSCROLL
+    LTEXT           "Exposure time",-1,510,34,50,8
+    EDITTEXT        IDSAVEEXP,510,44,50,12,ES_AUTOHSCROLL
+    LTEXT           "AOI X",-1,510,58,50,8
+    EDITTEXT        IDSAVEAOIX,510,68,50,12,ES_AUTOHSCROLL
+    LTEXT           "AOI Y",-1,510,82,50,8
+    EDITTEXT        IDSAVEAOIY,510,92,50,12,ES_AUTOHSCROLL
+    LTEXT           "AOI W",-1,510,106,50,8
+    EDITTEXT        IDSAVEAOIW,510,116,50,12,ES_AUTOHSCROLL
+    LTEXT           "AOI H",-1,510,130,50,8
+    EDITTEXT        IDSAVEAOIH,510,140,50,12,ES_AUTOHSCROLL
+END
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    "PIXCIDIALOG", DIALOG
     BEGIN
-
-	PUSHBUTTON	"Snap",        IDSNAP,		136, 10,50,12,
-	PUSHBUTTON	"Live",        IDLIVE,		136, 24,50,12,
-	PUSHBUTTON	"Stop",        IDSTOP,		136, 38,50,12,
-	PUSHBUTTON	"Seq. Capture",IDSEQCAPTURE,	136, 52,50,12,
-	PUSHBUTTON	"Seq. Display",IDSEQDISPLAY,	136, 66,50,12,
-	PUSHBUTTON	"Seq. Save",   IDSEQSAVE,	136, 80,50,12,	
-	LTEXT		"Buffer", -1,			136, 94, 50, 8,
-	SCROLLBAR		       IDBUFFERSCROLL,	136, 104,50, 8
-
-	LTEXT "FPS:", -1, 136, 116, 20, 10
-	LTEXT "", IDFPS, 156, 116, 40, 10, SS_LEFT
-	PUSHBUTTON	"QPD acq.", IDQPDACQ, 136, 138, 50, 12,
-
-	LTEXT		"",	IDIMAGE,		1,1,128,128
-
-	LTEXT		"Save path", -1, 20, 106, 50, 8,
-	EDITTEXT    IDSAVEPATH, 20, 116, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"Settings import path", -1, 20, 130, 50, 8,
-	EDITTEXT    IDSETTINGS, 20, 140, 50, 12, ES_AUTOHSCROLL
-
-	LTEXT		"Save interval", -1, 210, 10, 50, 8,
-	EDITTEXT    IDSAVEINT, 210, 20, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"Exposure time", -1, 210, 34, 50, 8,
-	EDITTEXT    IDSAVEEXP, 210, 44, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"AOI X", -1, 210, 58, 50, 8,
-	EDITTEXT    IDSAVEAOIX, 210, 68, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"AOI Y", -1, 210, 82, 50, 8,
-	EDITTEXT    IDSAVEAOIY, 210, 92, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"AOI W", -1, 210, 106, 50, 8,
-	EDITTEXT    IDSAVEAOIW, 210, 116, 50, 12, ES_AUTOHSCROLL
-	LTEXT		"AOI H", -1, 210, 130, 50, 8,
-	EDITTEXT    IDSAVEAOIH, 210, 140, 50, 12, ES_AUTOHSCROLL
-
     END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+PIXCIDIALOG AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+#endif    // English (United Kingdom) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

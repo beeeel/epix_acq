@@ -64,3 +64,4 @@
 #define IDSAVEPATH	152
 #define IDSETTINGS	153
 #define IDFPS		154
+#define IDNFRAMES	155
