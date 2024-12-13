@@ -167,8 +167,8 @@
  */
 #if !defined(USE_PXIPL)
     #define USE_PXIPL	0
-    #define SAVE_TIFF	1
-    #define SAVE_BINARY 0
+    #define SAVE_TIFF	0
+    #define SAVE_BINARY 1
     #define SAVE_AVI	0
 #endif
 
@@ -1125,10 +1125,10 @@ void saveData(const std::vector<std::unique_ptr<unsigned short[]>>& imageArray,
 
 	// Set up file paths within the directory
 	std::string tiffFilePath = savePath + "/image_data.tiff";
-	std::string xFilePath = savePath + "/X_data.bin";
-	std::string yFilePath = savePath + "/Y_data.bin";
-	std::string zFilePath = savePath + "/Z_data.bin";
-	std::string tFilePath = savePath + "/T_data.bin";
+	std::string xFilePath = savePath + "/X.bin";
+	std::string yFilePath = savePath + "/Y.bin";
+	std::string zFilePath = savePath + "/Z.bin";
+	std::string tFilePath = savePath + "/T.bin";
 
 	// Open a single TIFF file to save all frames as a multipage TIFF
 	TIFF* tiff = TIFFOpen(tiffFilePath.c_str(), "w");
@@ -1165,7 +1165,7 @@ void saveData(const std::vector<std::unique_ptr<unsigned short[]>>& imageArray,
 	// 2. Create time stamps based on framePeriod
 	double framePeriod = pxd_SILICONVIDEO_getFramePeriod(UNITSMAP) * 1e-3;
 	std::vector<double> timeStamps(X.size());
-	for (int i = 0; i < n_frames; ++i) {
+	for (int i = 0; i < X.size(); ++i) {
 		timeStamps[i] = i * framePeriod;
 	}
 
@@ -1196,7 +1196,7 @@ void processImageThread(HWND hWndImage, struct pxywindow windImage[]) {
 	// Allocate memory for image buffer array (application memory for each saved frame)
 	std::vector<std::unique_ptr<ushort[]>> imageArray(numSavedFrames);
 	for (int i = 0; i < numSavedFrames; ++i) {
-		imageArray[i] = std::make_unique<ushort[]>(aoi_w * aoi_h);
+		imageArray[i] = std::make_unique<ushort[]>((1 + aoi_w) * (1 + aoi_h));
 	}
 
 	// Allocate memory for X, Y, Z arrays
@@ -1262,17 +1262,16 @@ void processImageThread(HWND hWndImage, struct pxywindow windImage[]) {
 			buf = 1;
 
 		// Retrieve the next frame into the appropriate image buffer
-		pxcoord_t ulx = aoi_x - 1;  // Upper-left x of AOI
-		pxcoord_t uly = aoi_y - 1;  // Upper-left y of AOI
-		pxcoord_t lrx = aoi_x + aoi_w;  // Lower-right x of AOI
-		pxcoord_t lry = aoi_y + aoi_h;  // Lower-right y of AOI
+		pxcoord_t ulx = aoi_x == 0 ? 1: aoi_x;  // Upper-left x of AOI
+		pxcoord_t uly = aoi_y == 0 ? 1: aoi_y;  // Upper-left y of AOI
+		pxcoord_t lrx = (aoi_x == 0 ? 1 : 0) + aoi_x + aoi_w;  // Lower-right x of AOI
+		pxcoord_t lry = (aoi_y == 0 ? 1 : 0) + aoi_y + aoi_h;  // Lower-right y of AOI
 		ushort* imageBuffer = imageArray[frameNumber / save_int].get();
 		size_t cnt = (size_t)aoi_w * (size_t)aoi_h;
 
 		int u = 0;
 
-		int err = pxd_readushort(1 << u, buf, ulx, uly, -1, -1, imageBuffer, cnt, "Grey"); // There's good odds that this will be the line that errors if you use a colour camera.
-		
+		int err = pxd_readushort(1 << u, buf, 0, 0, -1 , -1, imageBuffer, cnt, "Grey"); // There's good odds that this will be the line that errors if you use a colour camera.
 		if (err < 0) {
 			// Use a sentinel value to indicate an invalid frame
 			for (int i = 0; i < aoi_w * aoi_h; ++i) {
